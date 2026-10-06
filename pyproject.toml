@@ -37,11 +37,14 @@ dependencies = [
   "pydantic>=2.13.4,<3",
   "typer>=0.27.1,<1",
   "uvicorn>=0.52.4,<1",
+  # Security floor for ClickHouse's HTTP transport (September 2026 advisories).
+  "urllib3>=2.8.0,<3",
 ]
 
 [project.scripts]
 backtest = "backtest.bootstrap.cli:app"
 backtest-job-child = "backtest.bootstrap.job_child:main"
+dnipro-backtest = "backtest.bootstrap.dnipro:main"
 
 [dependency-groups]
 dev = [

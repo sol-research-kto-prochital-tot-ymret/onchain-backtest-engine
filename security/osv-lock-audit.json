@@ -1,0 +1,48 @@
+{
+  "source": "https://api.osv.dev/v1/querybatch",
+  "queries": 348,
+  "findings": [
+    {
+      "package": {
+        "name": "urllib3",
+        "ecosystem": "PyPI"
+      },
+      "version": "2.7.0",
+      "vulnerabilities": [
+        {
+          "id": "GHSA-8988-9cw3-xx77",
+          "modified": "2026-09-30T15:00:05.369237Z"
+        },
+        {
+          "id": "GHSA-gh4c-6fx4-qh6g",
+          "modified": "2026-09-30T15:15:04.066660Z"
+        },
+        {
+          "id": "GHSA-vxq7-64xx-v4gw",
+          "modified": "2026-09-30T15:00:05.904945Z"
+        }
+      ]
+    },
+    {
+      "package": {
+        "name": "brace-expansion",
+        "ecosystem": "npm"
+      },
+      "version": "2.1.4",
+      "vulnerabilities": [
+        {
+          "id": "GHSA-6j4f-fj2g-mc7p",
+          "modified": "2026-09-30T00:00:03.836613Z"
+        },
+        {
+          "id": "GHSA-q2hr-2g5m-vwhr",
+          "modified": "2026-09-30T00:00:03.849541Z"
+        },
+        {
+          "id": "GHSA-qhr7-859c-m2p7",
+          "modified": "2026-09-30T00:00:04.402763Z"
+        }
+      ]
+    }
+  ]
+}

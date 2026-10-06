@@ -20,6 +20,7 @@ from hashlib import sha256
 from pathlib import Path
 from threading import Lock
 
+from backtest.adapters.process.environment import worker_environment
 from backtest.adapters.process.progress_pipe import (
     # Include progress pipe reader so the progress pipe dependency remains explicit.
     ProgressPipeReader,
@@ -166,16 +167,19 @@ class LocalSubprocessRunner:
             # boundary.
             _unlink_quietly(envelope_path)
             raise ProcessSpawnError("progress channel could not be created") from exc
-        environment = child_progress_environment(os.environ, progress_write_descriptor)
-        # Only the two bounded source-acquisition jobs may receive source secrets.
-        if attempt.spec.job_type not in {
+        # Only explicit source secrets reach acquisition jobs; unrelated parent
+        # credentials never reach any worker.
+        acquisition = attempt.spec.job_type in {
             JobType.PREPARE_DATASET,
             JobType.PREPARE_RESEARCH,
-        }:
-            # Handle the local subprocess runner spawn job type, prepare dataset and spec
-            # condition as a distinct block.
-            for secret_ref in self._source_secret_refs:
-                environment.pop(secret_ref, None)
+        }
+        environment = child_progress_environment(
+            worker_environment(
+                os.environ,
+                permitted_secret_refs=self._source_secret_refs if acquisition else (),
+            ),
+            progress_write_descriptor,
+        )
         apply_child_process_determinism(native_threads, environment)
         temporary_baseline = self._temporary_bytes()
         try:

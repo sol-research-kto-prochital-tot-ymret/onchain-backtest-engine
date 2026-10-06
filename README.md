@@ -21,6 +21,19 @@
 
 ---
 
+## Solana research integration
+
+This fork adds a Carbon/ClickHouse source adapter and the `dnipro-backtest` CLI
+for frozen Pump.fun snapshots and next-slot leader-copy research. It retains
+exact raw amounts, tracks observed fees and open inventory, and publishes
+verified immutable artifacts. These observational backtests have execution and
+coverage limits; they do not establish exact transaction landing or full-wallet PnL.
+
+See the [integration guide](docs/dnipro-integration.md) for commands and data
+contracts, and the [security review](security/REVIEW.md) for the dependency fixes,
+worker credential isolation, and recorded validation. The upstream engine and
+MIT license are retained below.
+
 On-Chain Backtest Engine selectively reads a requested range from an external read-only
 ClickHouse source, publishes an immutable canonical Parquet snapshot, and
 replays it deterministically on a single Linux, macOS, or Windows host with

@@ -1,0 +1,5 @@
+{
+  "exit_code": 2,
+  "output_published": false,
+  "error": "Error: exact replay unavailable: complete clock, history, signer, and tail proofs required"
+}

@@ -1,0 +1,41 @@
+
+> backtest-ui@0.2.0 test
+> vitest run && node --test ../tests/web/research-graph-*.test.cjs
+
+
+ RUN  v5.0.0 /Users/johnsmith/dev/dnipro-river-trading/python-hueta/onchain-backtest-engine/frontend
+
+
+ Test Files  8 passed (8)
+      Tests  79 passed (79)
+   Start at  13:49:16
+   Duration  2.19s (environment 53%, tests 15%, setup 13%, transform 10%, import 8%, worker 1%)
+
+✔ whole loading follows exact cursors and checks empty final pages and zero results (5.7175ms)
+✔ rejects artifact (0.627458ms)
+✔ rejects table (0.431042ms)
+✔ rejects missing row (0.436458ms)
+✔ rejects duplicate ordinal (0.831583ms)
+✔ rejects out of order (0.615625ms)
+✔ rejects duplicate pair (0.49025ms)
+✔ rejects bad reconciliation (0.423584ms)
+✔ rejects short continuing page (0.484917ms)
+✔ rejects missing cursor (0.706125ms)
+✔ rejects bad address (0.468958ms)
+✔ rejects pair and wallet limits, undercounts, oversized pages and looping cursors (15.475917ms)
+✔ aborted loading discards a late successful response (0.830833ms)
+✔ streaming enforces response and cumulative byte limits before parsing (179.946042ms)
+✔ accepts a lexically ordered signer prefix without misordering the tuple (0.774125ms)
+✔ weighted groups reconcile disjoint internal and crossing pairs with all wallets (11.251542ms)
+✔ presentation groups are deterministic for reordered equivalent input (16.094666ms)
+✔ wallet focus crosses groups and the optional induced neighbourhood adds every extra edge (11.006041ms)
+✔ empty graphs and local allocation bounds have explicit semantics (8.463541ms)
+✔ build and neighbourhood scans honour abort and ownership retirement (15.722917ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 313.397292

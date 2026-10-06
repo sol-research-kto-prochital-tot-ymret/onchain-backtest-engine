@@ -1,0 +1,25 @@
+{
+  "readonly": true,
+  "trade_rows": 1,
+  "state_rows": 1,
+  "slot": 451480851,
+  "mint": "CR4cuWRKzTULkBoYhnSGLT59VzUs8Yn9cbTm418Kpump",
+  "actor_attribution": "trade_event_user",
+  "state": [
+    {
+      "virtual_sol_reserves": 47471502820,
+      "virtual_token_reserves": 678091026708204,
+      "real_sol_reserves": 17471502820,
+      "real_token_reserves": 398191026708204,
+      "slot": 451480851,
+      "block_time": 1790641886,
+      "mint": "CR4cuWRKzTULkBoYhnSGLT59VzUs8Yn9cbTm418Kpump",
+      "last_transaction_index": 74,
+      "last_absolute_path": [
+        4,
+        6
+      ]
+    }
+  ],
+  "state_query_source": "backtest.adapters.source.clickhouse.carbon.STATE_SQL"
+}

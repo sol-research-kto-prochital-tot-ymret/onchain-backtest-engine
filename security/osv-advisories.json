@@ -1,0 +1,816 @@
+[
+  {
+    "id": "GHSA-6j4f-fj2g-mc7p",
+    "summary": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+    "details": "### Summary\n\n`parseCommaParts()` can exhaust the native stack and crash the process. There are two distinct ways to trigger it, both reachable from a single untrusted pattern string.\n\nThis is the parsing-side counterpart to CVE-2026-14257 / GHSA-mh99-v99m-4gvg. That fix made `expand_()` iterative and documented a constant-stack-depth guarantee, but `parseCommaParts()` was left recursive, so the guarantee only held for one of the two parsing paths.\n\n### Vector 1 - unbounded recursion on `post`\n\n`parseCommaParts()` recursed on the remainder of the string once per brace group:\n\n```js\nconst postParts = parseCommaParts(post)   // unbounded\n```\n\nA brace group containing many comma-separated groups drives one recursion level per group:\n\n```js\nexpand('{' + '{a},'.repeat(7000) + 'b}')\n// RangeError: Maximum call stack size exceeded\n```\n\nAbout 7,300 repetitions - roughly 29 KB of input - is enough on Node 24; roughly 6,300 (25 KB) on Node 18. The threshold is identical on every affected release line.\n\n### Vector 2 - `push.apply` with an unbounded array\n\nEven with the recursion removed, `parseCommaParts()` spread whole arrays into an argument list:\n\n```js\np.push.apply(p, postParts)\nparts.push.apply(parts, p)\n```\n\n`Function.prototype.apply` places one argument per element on the stack, so a single large array overflows it. This needs **no recursion depth at all** - the following reaches a recursion depth of exactly 1:\n\n```js\nexpand('{{x},' + 'a,'.repeat(125000) + 'b}')\n// RangeError: Maximum call stack size exceeded\n```\n\nThreshold is about 124,300 repetitions (~249 KB). This vector was not part of the original report; it was found while verifying the fix. A patch that only de-recurses but keeps `push.apply` leaves a working denial of service behind.\n\n### Why `max` and `maxLength` do not help\n\nBoth crashes happen during **parsing**, before any expansion. The payloads produce one result per group, so output size grows linearly with input and is never the limiter. `expand(payload, { max: 1, maxLength: 1 })` still overflows.\n\n### Impact\n\nAny application that passes an untrusted string to `expand()` - directly, or through `minimatch` / `glob` where it is a user-supplied glob pattern - can be crashed. In Node, a `RangeError` that the application does not catch terminates the process, so a server that globs user input is exposed to remote unauthenticated denial of service.\n\n`minimatch`'s own `MAX_PATTERN_LENGTH` cap (65,536) does not help against vector 1: the overflow threshold sits well below it. Confirmed on minimatch 10.2.6 - a 64,003-byte pattern passes the length check and overflows both `minimatch.braceExpand()` and `new minimatch.Minimatch()`.\n\nThis is an availability-only issue. No code execution and no data exposure.\n\n### Not a regression\n\n5.0.8 and 5.0.9 overflow at the same repetition count, so the gap predates the recent advisories; those fixes simply did not reach it. Verified affected on 1.1.18, 2.1.4, 3.0.6, 5.0.8 and 5.0.9, all at an identical threshold.\n\n### Patch\n\n`parseCommaParts()` is rewritten as a loop that carries the partial part across chunks, and every array append uses an element-by-element loop rather than `push.apply`. The redundant `if (!str) return ['']` guard is dropped - the loop returns `['']` for the empty string on its own.\n\nEquivalence of the old and new implementations was checked by differential testing: exhaustive over every string of `{`, `}`, `,`, `a` up to length 7 plus 300,000 random inputs - 322,000 cases, zero mismatches.\n\n### Severity note\n\nScored 7.5 High under CVSS 3.1 for consistency with the other availability advisories on this package (GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895), which use the same vector. The reporter self-assessed 6.9 Medium under CVSS 4.0 (`CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N`).\n\n### Credit\n\nReported by baeseungwon1010, with a working proof of concept and a proposed patch. Vector 2 was identified during maintainer verification.",
+    "aliases": [
+      "CVE-2026-102276"
+    ],
+    "modified": "2026-09-30T00:00:03.836613572Z",
+    "published": "2026-09-29T23:44:58Z",
+    "database_specific": {
+      "github_reviewed": true,
+      "github_reviewed_at": "2026-09-29T23:44:58Z",
+      "nvd_published_at": "2026-09-28T21:17:16Z",
+      "cwe_ids": [
+        "CWE-400",
+        "CWE-674"
+      ],
+      "severity": "HIGH"
+    },
+    "references": [
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-6j4f-fj2g-mc7p"
+      },
+      {
+        "type": "ADVISORY",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-102276"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/0bcbfc0a5928c3073d48f42999d1ce4fc1c42fbc"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/316359e6019c39b3254c8ba8e25dc586a480652c"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/5171e681c0922b7ae8bfaf9a331e309107be6edc"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/6735c94873ca570bcdd6a0690033bdd3126379d3"
+      },
+      {
+        "type": "PACKAGE",
+        "url": "https://github.com/juliangruber/brace-expansion"
+      }
+    ],
+    "affected": [
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "4.0.0"
+              },
+              {
+                "fixed": "5.0.10"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-6j4f-fj2g-mc7p/GHSA-6j4f-fj2g-mc7p.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "3.0.0"
+              },
+              {
+                "fixed": "3.0.7"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-6j4f-fj2g-mc7p/GHSA-6j4f-fj2g-mc7p.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "2.0.0"
+              },
+              {
+                "fixed": "2.1.5"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-6j4f-fj2g-mc7p/GHSA-6j4f-fj2g-mc7p.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "1.1.19"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-6j4f-fj2g-mc7p/GHSA-6j4f-fj2g-mc7p.json"
+        }
+      }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+      {
+        "type": "CVSS_V3",
+        "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-8988-9cw3-xx77",
+    "summary": "urllib3: HTTPS proxy TLS configuration may be ignored or overridden",
+    "details": "## Impact\n\nurllib3 supports configuring TLS independently for an HTTPS proxy and the target server.\n\n`proxy_ssl_context`, `proxy_assert_hostname`, and `proxy_assert_fingerprint` configure the TLS connection to the proxy. `ssl_context` and the other target-specific TLS parameters configure the connection to the target server.\n\nIn urllib3 versions 1.26.0 through 2.7.0, these configurations were not consistently separated. Depending on the proxy mode, urllib3 could:\n\n1. Ignore `proxy_ssl_context` and use the target server's SSL context for the TLS connection to an HTTPS forwarding proxy.\n2. Override the HTTPS proxy's certificate-verification policy with the target server's certificate-verification policy.\n3. Apply target-specific SNI, hostname assertions, certificate fingerprint assertions, or TLS client credentials to the TLS connection to an HTTPS forwarding proxy.\n\nIn particular, configuring `cert_reqs=\"CERT_NONE\"` for a target server could overwrite the `verify_mode` of the SSL context configured for the HTTPS proxy. This modification occurred in place and persisted on the context object, potentially disabling proxy certificate verification for later connections that reused the same context.\n\nAn attacker able to intercept the connection to an HTTPS proxy may be able to impersonate the proxy when the effective proxy TLS configuration disables certificate verification or otherwise accepts the attacker's certificate. This may occur, for example, when the target server's trust or identity policy is incorrectly applied to the proxy connection.\n\nWhen HTTPS forwarding is enabled, an impersonated proxy can observe or modify forwarded requests and responses, potentially exposing credentials, authentication tokens, request bodies, response data, and other sensitive information.\n\nA TLS client certificate intended for the target server may also be presented to the proxy or to an attacker impersonating it. This can disclose the client's identity and provide proof of possession of the corresponding private key. The private key itself is not transmitted during the TLS handshake.\n\nIn CONNECT tunneling mode, impersonating the HTTPS proxy does not by itself defeat the separate end-to-end TLS connection between the client and the target server.\n\n## Affected Usages\n\nCode using urllib3 versions 1.26.0 through 2.7.0 may be affected in any of the following cases.\n\n### 1. The target SSL context is used for an HTTPS forwarding proxy\n\nHTTPS requests are forwarded through an HTTPS proxy with `use_forwarding_for_https=True`, and `proxy_ssl_context` is configured for the proxy.\n\nurllib3 may ignore `proxy_ssl_context` and use the target server's `ssl_context` for the proxy TLS handshake. The proxy may therefore be verified using the target server's trust and certificate policy instead of the policy explicitly configured for the proxy.\n\n### 2. The target verification policy overrides the proxy policy\n\nAn HTTPS proxy is configured with `proxy_ssl_context`, while the target server uses a different certificate-verification policy.\n\nurllib3 may apply the target server's `cert_reqs` value to the proxy SSL context. For example, setting `cert_reqs=\"CERT_NONE\"` for the target server may also disable certificate verification for the HTTPS proxy, even when `proxy_ssl_context` was configured to require verification.\n\nThis issue can affect the TLS connection to an HTTPS proxy in both forwarding and CONNECT tunneling configurations.\n\n### 3. A mutated proxy SSL context is reused\n\nThe same SSL context is reused as `proxy_ssl_context` across multiple connections, and certificate verification is disabled for one target server.\n\nurllib3 may modify the proxy SSL context's `verify_mode` in place. Later connections that reuse the same context may therefore connect to the HTTPS proxy without certificate verification.\n\n### 4. Target-specific TLS identity or credentials are applied to the proxy\n\nHTTPS requests are forwarded through an HTTPS proxy with `use_forwarding_for_https=True`, and target-specific SNI, hostname assertions, certificate fingerprint assertions, or TLS client credentials are configured.\n\nurllib3 may apply these target-specific settings to the proxy TLS handshake. This may cause urllib3 to:\n\n- send SNI intended for the target server to the proxy;\n- verify the proxy using a hostname or certificate fingerprint intended for the target server; or\n- present a TLS client certificate intended for the target server to the proxy.\n\nCode connecting through a plain HTTP proxy does not establish a TLS connection to the proxy and is not affected by this issue.\n\n## Remediation\n\nUpgrade to urllib3 2.8.0 or later.\n\nurllib3 2.8.0 independently applies the explicitly configured `proxy_ssl_context` and proxy-specific certificate assertions to the HTTPS proxy connection. Target-specific SNI, certificate assertions, and TLS client certificate parameters are no longer applied to the HTTPS proxy handshake.\n\nFor backward compatibility, when an HTTPS proxy is used with `use_forwarding_for_https=True` and `proxy_ssl_context` is not provided, urllib3 2.8.0 continues to use `ssl_context` for the TLS connection to the proxy. This configuration emits a `FutureWarning`. In urllib3 3.0, passing `ssl_context` with `use_forwarding_for_https=True` for an HTTPS proxy will raise an error. Applications should use `proxy_ssl_context` to configure TLS for an HTTPS forwarding proxy.\n\nThe fixes were implemented in commits b6447295fff7b38fdffc67e0df9712d60cef3cc3 and 07408cec79d1856d81bb42c74a904a24fdb9e465.",
+    "aliases": [
+      "CVE-2026-97687"
+    ],
+    "modified": "2026-09-30T15:00:05.369237042Z",
+    "published": "2026-09-30T14:46:04Z",
+    "database_specific": {
+      "severity": "HIGH",
+      "github_reviewed": true,
+      "github_reviewed_at": "2026-09-30T14:46:04Z",
+      "nvd_published_at": "2026-09-29T16:17:18Z",
+      "cwe_ids": [
+        "CWE-295",
+        "CWE-440"
+      ]
+    },
+    "references": [
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/security/advisories/GHSA-8988-9cw3-xx77"
+      },
+      {
+        "type": "ADVISORY",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-97687"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/pull/5093"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/commit/07408cec79d1856d81bb42c74a904a24fdb9e465"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/commit/b6447295fff7b38fdffc67e0df9712d60cef3cc3"
+      },
+      {
+        "type": "PACKAGE",
+        "url": "https://github.com/urllib3/urllib3"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/releases/tag/2.8.0"
+      }
+    ],
+    "affected": [
+      {
+        "package": {
+          "name": "urllib3",
+          "ecosystem": "PyPI",
+          "purl": "pkg:pypi/urllib3"
+        },
+        "ranges": [
+          {
+            "type": "ECOSYSTEM",
+            "events": [
+              {
+                "introduced": "1.26.0"
+              },
+              {
+                "fixed": "2.8.0"
+              }
+            ]
+          }
+        ],
+        "versions": [
+          "1.26.0",
+          "1.26.1",
+          "1.26.10",
+          "1.26.11",
+          "1.26.12",
+          "1.26.13",
+          "1.26.14",
+          "1.26.15",
+          "1.26.16",
+          "1.26.17",
+          "1.26.18",
+          "1.26.19",
+          "1.26.2",
+          "1.26.20",
+          "1.26.3",
+          "1.26.4",
+          "1.26.5",
+          "1.26.6",
+          "1.26.7",
+          "1.26.8",
+          "1.26.9",
+          "2.0.0",
+          "2.0.0a1",
+          "2.0.0a2",
+          "2.0.0a3",
+          "2.0.0a4",
+          "2.0.1",
+          "2.0.2",
+          "2.0.3",
+          "2.0.4",
+          "2.0.5",
+          "2.0.6",
+          "2.0.7",
+          "2.1.0",
+          "2.2.0",
+          "2.2.1",
+          "2.2.2",
+          "2.2.3",
+          "2.3.0",
+          "2.4.0",
+          "2.5.0",
+          "2.6.0",
+          "2.6.1",
+          "2.6.2",
+          "2.6.3",
+          "2.7.0"
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-8988-9cw3-xx77/GHSA-8988-9cw3-xx77.json"
+        }
+      }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+      {
+        "type": "CVSS_V4",
+        "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-gh4c-6fx4-qh6g",
+    "summary": "urllib3: Chunked Deflate streaming can enter an infinite loop",
+    "details": "### Impact\n\nurllib3's streaming API is designed for the efficient handling of large HTTP responses by reading content in chunks instead of loading the entire response body into memory at once.\n\nurllib3 can decompress response bodies according to the HTTP `Content-Encoding` header. When streaming a compressed, chunked response, urllib3 first consumes data already buffered by the decoder before reading the next HTTP chunk.\n\nHowever, urllib3 versions from 2.6.2 through 2.7.0 could enter an infinite loop when a chunked response contained bytes after the end of the Deflate stream. If the decompressed body exceeded the requested streaming chunk size, Python's zlib implementation could retain the trailing bytes as unconsumed input after reaching the end of the compressed stream. urllib3 would repeatedly attempt to decode those same bytes without making progress or reading more data from the network.\n\nA malicious server could exploit this behavior to cause excessive CPU usage and prevent the affected request from completing on the client. Network read timeouts would not interrupt the loop because no further socket operation was required.\n\n### Affected usages\n\nApplications and libraries using urllib3 versions 2.6.2 through 2.7.0 may be affected when all of the following conditions are met:\n\n1. Compressed responses from an untrusted source are streamed using `HTTPResponse.stream(amt=N)` or `HTTPResponse.read_chunked(amt=N)` with a positive, finite chunk size.\n2. Content decoding is enabled.\n3. The response uses both `Transfer-Encoding: chunked` and `Content-Encoding: deflate`.\n4. The decoded body exceeds the requested chunk size and the encoded body contains bytes after the end of the Deflate stream.\n\n`HTTPResponse.stream()` uses a finite chunk size by default and is therefore affected when the other conditions are met.\n\n### Remediation\n\nUpgrade to urllib3 2.8.0, in which the Deflate decoder stops accepting input after reaching the end of the compressed stream and no longer reports trailing bytes as data that can produce more decoded output.\n\nIf upgrading is not immediately possible, disable automatic content decoding for responses from untrusted sources by setting `decode_content=False`, or reject streamed responses using the Deflate content encoding. Applications that disable automatic decoding must handle the compressed response safely at another layer.",
+    "aliases": [
+      "CVE-2026-97688"
+    ],
+    "modified": "2026-09-30T15:15:04.066660799Z",
+    "published": "2026-09-30T15:00:38Z",
+    "database_specific": {
+      "github_reviewed": true,
+      "github_reviewed_at": "2026-09-30T15:00:38Z",
+      "nvd_published_at": "2026-09-29T16:17:18Z",
+      "cwe_ids": [
+        "CWE-835"
+      ],
+      "severity": "MODERATE"
+    },
+    "references": [
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/security/advisories/GHSA-gh4c-6fx4-qh6g"
+      },
+      {
+        "type": "ADVISORY",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-97688"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/commit/ea2ad7b21a80da3632f80016526a18864586077f"
+      },
+      {
+        "type": "PACKAGE",
+        "url": "https://github.com/urllib3/urllib3"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/releases/tag/2.8.0"
+      }
+    ],
+    "affected": [
+      {
+        "package": {
+          "name": "urllib3",
+          "ecosystem": "PyPI",
+          "purl": "pkg:pypi/urllib3"
+        },
+        "ranges": [
+          {
+            "type": "ECOSYSTEM",
+            "events": [
+              {
+                "introduced": "2.6.2"
+              },
+              {
+                "fixed": "2.8.0"
+              }
+            ]
+          }
+        ],
+        "versions": [
+          "2.6.2",
+          "2.6.3",
+          "2.7.0"
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-gh4c-6fx4-qh6g/GHSA-gh4c-6fx4-qh6g.json"
+        }
+      }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+      {
+        "type": "CVSS_V4",
+        "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-q2hr-2g5m-vwhr",
+    "summary": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+    "details": "### Summary\n\nExpanding `{a},b}`-shaped input takes time quadratic in the number of literal `}` characters, blocking the event loop.\n\nBash preserves a quirk where a brace group followed by a comma set still expands (`{a},b}`). The parser implements this by rewriting the string and restarting the scan. Each pass absorbs exactly one `}` and re-scans from the beginning, so `n` trailing braces cost `n` full passes.\n\n### Reproduction\n\n```js\nconst build = n => '{a}' + '}'.repeat(n) + ',z}'\n\nfor (const n of [8000, 16000, 32000, 64000, 128000]) {\n  const t = Date.now()\n  expand(build(n))\n  console.log(n, Date.now() - t + 'ms')\n}\n```\n\n| n | input | time | results |\n|---|---|---|---|\n| 8,000 | 8 KB | 110 ms | 2 |\n| 16,000 | 16 KB | 446 ms | 2 |\n| 32,000 | 32 KB | 1.7 s | 2 |\n| 64,000 | 64 KB | 6.9 s | 2 |\n| 128,000 | 128 KB | **27.7 s** | 2 |\n\n`ms/n^2` is flat at ~1.7 and each doubling of `n` costs exactly 4.0x - quadratic. 128 KB of input blocks the event loop for nearly half a minute to produce two results.\n\n### Mechanism\n\nInstrumenting the rewrite branch confirms it runs exactly `n + 1` times, once per literal `}`, each re-scanning the whole string.\n\nThere is a second multiplier. The rewrite replaces the group's closing `}` with the internal `escClose` sentinel, which is `'\\0CLOSE' + Math.random() + '\\0'` - about 25 characters. The working string therefore *grows* by ~25 characters on every pass:\n\n| n | input length | final string length |\n|---|---|---|\n| 1,000 | 1,006 | 26,006 |\n| 8,000 | 8,006 | 208,006 |\n\nSo the input is inflated roughly 26x, and that factor multiplies both the quadratic constant and peak memory. This makes it partly a memory-pressure issue as well as a CPU one.\n\n### Why `max` and `maxLength` do not help\n\nThe cost is in parsing, before the result set exists. The payload yields 2 results regardless of size, so neither bound is ever reached.\n\n### Impact\n\nAn application passing an untrusted pattern to `expand()`, directly or through `minimatch` / `glob`, can have its event loop blocked for tens of seconds by a payload well under minimatch's 65,536-character cap. For a single-threaded Node server that is a full stall, not just a slow request.\n\nDegraded availability rather than a crash - the process recovers once the expansion completes.\n\n### Affected versions\n\nVerified affected on 1.1.18, 2.1.4, 3.0.6 and 5.0.9, all within a few percent of each other (~460-490 ms at n=16,000).\n\n### Patch\n\nThe rewrite loop gets an iteration bound. Past the cap the remaining string is treated as non-expanding and returned literally, consistent with the existing `max` / `maxLength` caps, which truncate rather than throw.\n\nNote this bounds the number of passes, not the cost of each: worst-case work remains proportional to `cap x input length`. The cap is set low enough that the residual is bounded in practice, and far above what any realistic `{a},b}` input needs.\n\n### Severity note\n\nScored 5.3 Medium (`A:L`) for consistency with GHSA-3jxr-9vmj-r5cp, the other algorithmic-complexity advisory on this package (CWE-407), which uses the same vector. The stack-exhaustion advisories on this package score `A:H` because they crash the process outright; this one stalls it.",
+    "aliases": [
+      "CVE-2026-102277"
+    ],
+    "modified": "2026-09-30T00:00:03.849541183Z",
+    "published": "2026-09-29T23:45:39Z",
+    "database_specific": {
+      "github_reviewed_at": "2026-09-29T23:45:39Z",
+      "nvd_published_at": "2026-09-28T21:17:16Z",
+      "cwe_ids": [
+        "CWE-400",
+        "CWE-407"
+      ],
+      "severity": "MODERATE",
+      "github_reviewed": true
+    },
+    "references": [
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-q2hr-2g5m-vwhr"
+      },
+      {
+        "type": "ADVISORY",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-102277"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/33a5ef17b8d800bbfa8c52b14c39043b6aac1a96"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/bdff773f98e5988616b7039cc9b508df5d640b22"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/c55e67d8d8b1c56a2474afff15c2891166b2d364"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/ffdfa3e3806bed17c0874b8f1439b084de354a7e"
+      },
+      {
+        "type": "PACKAGE",
+        "url": "https://github.com/juliangruber/brace-expansion"
+      }
+    ],
+    "affected": [
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "4.0.0"
+              },
+              {
+                "fixed": "5.0.12"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-q2hr-2g5m-vwhr/GHSA-q2hr-2g5m-vwhr.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "3.0.0"
+              },
+              {
+                "fixed": "3.0.9"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-q2hr-2g5m-vwhr/GHSA-q2hr-2g5m-vwhr.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "2.0.0"
+              },
+              {
+                "fixed": "2.1.7"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-q2hr-2g5m-vwhr/GHSA-q2hr-2g5m-vwhr.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "1.1.21"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-q2hr-2g5m-vwhr/GHSA-q2hr-2g5m-vwhr.json"
+        }
+      }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+      {
+        "type": "CVSS_V3",
+        "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-qhr7-859c-m2p7",
+    "summary": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+    "details": "### Summary\n\n`expand_()` recurses once per level of brace *nesting*. Deeply nested input exhausts the native stack and crashes the process.\n\nThis is distinct from CVE-2026-14257 / GHSA-mh99-v99m-4gvg, which made the *tail* iterative (recursion on `m.post`, driven by how many groups are chained). Nesting depth drives a different recursion that the tail fix never touched, so the documented constant-stack-depth guarantee only ever covered chained input, not nested input.\n\nIt is also distinct from GHSA-6j4f-fj2g-mc7p, which fixed recursion in `parseCommaParts()`. Both payloads below still crash with that fix applied.\n\n### Two recursion sites\n\n**Comma members.** Each alternative of a brace set is expanded by a recursive call, so nesting a set inside every alternative recurses once per level:\n\n```js\nexpand('{a,'.repeat(4000) + 'z' + '}'.repeat(4000))\n// RangeError: Maximum call stack size exceeded\n```\n\nCrashes at depth 3,907 - about **15.6 KB** of input.\n\n**Single set.** A brace set whose body parses to a single part is expanded by a recursive call before being re-wrapped (`x{{a,b}}y` -> `x{a}y x{b}y`), which recurses once per nesting level:\n\n```js\nexpand('{'.repeat(3200) + 'a,b' + '}'.repeat(3200))\n// RangeError: Maximum call stack size exceeded\n```\n\nCrashes at depth 3,125 - about **6.25 KB** of input. This is the cheapest stack-exhaustion payload known against this package: roughly a quarter the input of GHSA-6j4f-fj2g-mc7p (29 KB), and about a tenth of minimatch's `MAX_PATTERN_LENGTH` (65,536).\n\n### Why `max` and `maxLength` do not help\n\nBoth crashes happen while recursing into sub-expansions, before the result set grows. The payloads produce almost no output - the single-set case yields 2 results - so neither bound is ever the limiter. `expand(payload, { max: 1, maxLength: 1 })` still overflows.\n\n### Impact\n\nAny application passing an untrusted string to `expand()`, directly or through `minimatch` / `glob` as a user-supplied glob pattern, can be crashed. In Node a `RangeError` the application does not catch terminates the process, so a server globbing user input is exposed to remote unauthenticated denial of service.\n\nAvailability only. No code execution, no data exposure.\n\n### Affected versions\n\nVerified affected on 1.1.18, 2.1.4, 3.0.6 and 5.0.9, at near-identical depths on every line (single set: 3,125 on all four; comma members: 3,907-4,102). Not a regression from any recent fix - the gap predates them.\n\n### Patch\n\nA `maxDepth` bound (default `EXPANSION_MAX_DEPTH`) is threaded through `expand_()`. Past the cap a group is treated as non-expanding and returned literally, which is how the parser already handles a group that cannot expand. This matches the existing `max` / `maxLength` caps, which truncate rather than throw, so `expand()` continues never to throw on any input.\n\nThe default sits far above any realistic nesting depth and well below the crash threshold.",
+    "aliases": [
+      "CVE-2026-102278"
+    ],
+    "modified": "2026-09-30T00:00:04.402763332Z",
+    "published": "2026-09-29T23:45:17Z",
+    "database_specific": {
+      "nvd_published_at": "2026-09-28T21:17:16Z",
+      "cwe_ids": [
+        "CWE-400",
+        "CWE-674"
+      ],
+      "severity": "HIGH",
+      "github_reviewed": true,
+      "github_reviewed_at": "2026-09-29T23:45:17Z"
+    },
+    "references": [
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-qhr7-859c-m2p7"
+      },
+      {
+        "type": "ADVISORY",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-102278"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/1efee7c397c191da6287a78ec19512476a966a7b"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/935d78f32f335b2ff76578e5c5e877d31ae9888c"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/juliangruber/brace-expansion/commit/de84f144e9816f30e25fc8179e2e1249ab6df0db"
+      },
+      {
+        "type": "PACKAGE",
+        "url": "https://github.com/juliangruber/brace-expansion"
+      }
+    ],
+    "affected": [
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "4.0.0"
+              },
+              {
+                "fixed": "5.0.11"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-qhr7-859c-m2p7/GHSA-qhr7-859c-m2p7.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "3.0.0"
+              },
+              {
+                "fixed": "3.0.8"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-qhr7-859c-m2p7/GHSA-qhr7-859c-m2p7.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "2.0.0"
+              },
+              {
+                "fixed": "2.1.6"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-qhr7-859c-m2p7/GHSA-qhr7-859c-m2p7.json"
+        }
+      },
+      {
+        "package": {
+          "name": "brace-expansion",
+          "ecosystem": "npm",
+          "purl": "pkg:npm/brace-expansion"
+        },
+        "ranges": [
+          {
+            "type": "SEMVER",
+            "events": [
+              {
+                "introduced": "0"
+              },
+              {
+                "fixed": "1.1.20"
+              }
+            ]
+          }
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-qhr7-859c-m2p7/GHSA-qhr7-859c-m2p7.json"
+        }
+      }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+      {
+        "type": "CVSS_V3",
+        "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-vxq7-64xx-v4gw",
+    "summary": "urllib3: HTTPResponse.stream()/read_chunked() buffers an unbounded chunk-size line into memory",
+    "details": "## Impact\n\nurllib3's [streaming API](https://urllib3.readthedocs.io/en/2.7.0/advanced-usage.html#streaming-and-i-o) is designed for efficiently handling large HTTP responses by reading the content in chunks, rather than loading the entire response body into memory at once. When decoding a [chunked-transfer-encoded response](https://httpwg.org/specs/rfc9112.html#chunked.encoding), this API reads each chunk's size field by buffering until it sees `\\n` or EOF.\n\nA malicious HTTP server can return `Transfer-Encoding: chunked` and then send a very long run of bytes without any newline, causing the streaming client to buffer that entire run before urllib3 can reject the chunk size as invalid and allocate more memory than intended.\n\nTo fix the issue, we'll reject chunk-size fields larger than 65536 bytes, as already done in the non-streaming case, which is currently handled by the Python standard library. Note that this only applies to reading the chunk-size field, not the chunk data, which is already handled correctly. Thus, there shouldn't be any impact for non-malicious servers.\n\n## Affected usages\n\nApplications and libraries using urllib3 versions earlier than 2.8.0 may be affected when streaming a chunked response from untrusted sources. Specifically, this affects the [read_chunked()](https://urllib3.readthedocs.io/en/stable/reference/urllib3.response.html#urllib3.response.BaseHTTPResponse.read_chunked) and [stream()](https://urllib3.readthedocs.io/en/stable/reference/urllib3.response.html#urllib3.response.BaseHTTPResponse.stream) methods of the HTTPResponse object.\n\nThis also affects requests streaming API, which uses urllib3 under the hood.\n\n## Remediation\n\nUpgrade to urllib3 version 2.8.0 or later, where chunk-size fields larger than 65536 will be rejected. If upgrading is not immediately possible, consider reading the response at once using the [read()](https://urllib3.readthedocs.io/en/stable/reference/urllib3.response.html#urllib3.response.BaseHTTPResponse.read) method.",
+    "aliases": [
+      "CVE-2026-97689"
+    ],
+    "modified": "2026-09-30T15:00:05.904945330Z",
+    "published": "2026-09-30T14:46:18Z",
+    "database_specific": {
+      "cwe_ids": [
+        "CWE-770"
+      ],
+      "severity": "HIGH",
+      "github_reviewed": true,
+      "github_reviewed_at": "2026-09-30T14:46:18Z",
+      "nvd_published_at": "2026-09-29T16:17:18Z"
+    },
+    "references": [
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/security/advisories/GHSA-vxq7-64xx-v4gw"
+      },
+      {
+        "type": "ADVISORY",
+        "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-97689"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/commit/cd770b059b543be29298ea5c52afb0b1b090f5ed"
+      },
+      {
+        "type": "PACKAGE",
+        "url": "https://github.com/urllib3/urllib3"
+      },
+      {
+        "type": "WEB",
+        "url": "https://github.com/urllib3/urllib3/releases/tag/2.8.0"
+      }
+    ],
+    "affected": [
+      {
+        "package": {
+          "name": "urllib3",
+          "ecosystem": "PyPI",
+          "purl": "pkg:pypi/urllib3"
+        },
+        "ranges": [
+          {
+            "type": "ECOSYSTEM",
+            "events": [
+              {
+                "introduced": "1.10.3"
+              },
+              {
+                "fixed": "2.8.0"
+              }
+            ]
+          }
+        ],
+        "versions": [
+          "1.10.3",
+          "1.10.4",
+          "1.11",
+          "1.12",
+          "1.13",
+          "1.13.1",
+          "1.14",
+          "1.15",
+          "1.15.1",
+          "1.16",
+          "1.17",
+          "1.18",
+          "1.18.1",
+          "1.19",
+          "1.19.1",
+          "1.20",
+          "1.21",
+          "1.21.1",
+          "1.22",
+          "1.23",
+          "1.24",
+          "1.24.1",
+          "1.24.2",
+          "1.24.3",
+          "1.25",
+          "1.25.1",
+          "1.25.10",
+          "1.25.11",
+          "1.25.2",
+          "1.25.3",
+          "1.25.4",
+          "1.25.5",
+          "1.25.6",
+          "1.25.7",
+          "1.25.8",
+          "1.25.9",
+          "1.26.0",
+          "1.26.1",
+          "1.26.10",
+          "1.26.11",
+          "1.26.12",
+          "1.26.13",
+          "1.26.14",
+          "1.26.15",
+          "1.26.16",
+          "1.26.17",
+          "1.26.18",
+          "1.26.19",
+          "1.26.2",
+          "1.26.20",
+          "1.26.3",
+          "1.26.4",
+          "1.26.5",
+          "1.26.6",
+          "1.26.7",
+          "1.26.8",
+          "1.26.9",
+          "2.0.0",
+          "2.0.0a1",
+          "2.0.0a2",
+          "2.0.0a3",
+          "2.0.0a4",
+          "2.0.1",
+          "2.0.2",
+          "2.0.3",
+          "2.0.4",
+          "2.0.5",
+          "2.0.6",
+          "2.0.7",
+          "2.1.0",
+          "2.2.0",
+          "2.2.1",
+          "2.2.2",
+          "2.2.3",
+          "2.3.0",
+          "2.4.0",
+          "2.5.0",
+          "2.6.0",
+          "2.6.1",
+          "2.6.2",
+          "2.6.3",
+          "2.7.0"
+        ],
+        "database_specific": {
+          "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-vxq7-64xx-v4gw/GHSA-vxq7-64xx-v4gw.json"
+        }
+      }
+    ],
+    "schema_version": "1.9.0",
+    "severity": [
+      {
+        "type": "CVSS_V4",
+        "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:H"
+      }
+    ]
+  }
+]

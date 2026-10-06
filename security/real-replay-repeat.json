@@ -1,0 +1,58 @@
+{
+  "result": "var/dnipro/nya-final-replay-repeat.json",
+  "sha256": "6fc5348111563b16a00d79f5ab7359d5f9d3fd0548a9baf426d081510691e010",
+  "summary": {
+    "format": "dnipro-leader-slot-research-result/v1",
+    "exact_execution": false,
+    "source_trade_count": 4141,
+    "selected_pairs": 1947,
+    "selection_exclusions": {
+      "multiple_entries": 48,
+      "no_entry_in_window": 24,
+      "unsupported_mayhem_or_cashback": 1,
+      "zero_amount": 2
+    },
+    "statuses": {
+      "CLOSED": 1864,
+      "OPEN": 83
+    },
+    "initial_sol_lamports": 1000000000000,
+    "final_available_sol_lamports": 888961463369,
+    "cash_delta_lamports": -111038536631,
+    "closed_trade_pnl_lamports": -44877616618,
+    "open_position_cost_basis_lamports": 66160920013,
+    "leader_observed_subset_pnl_lamports": 16065742004,
+    "ledger_transaction_count": 3811,
+    "excluded_mints": [
+      "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"
+    ],
+    "assumptions": [
+      "One buy and one full sell per mint; future pairing selects a restricted sample.",
+      "Own orders land first in signal slot + 1; slot coverage and placement are unproven.",
+      "Normal fixed-supply curve math; Token-2022/mode/program evidence is not exact.",
+      "Exogenous historical market; hypothetical trades do not change later events.",
+      "Quote rejection is pre-submit and retains tokens; no retry or forced zero valuation.",
+      "Leader transaction fees are proxies unless explicit copy fees are supplied.",
+      "Jito tips, rent, landed failures, slippage competition, and other venues are absent.",
+      "This result is not a complete-wallet or all-launchpad PnL backtest."
+    ],
+    "snapshot_manifest_sha256": "9a2740dc189e0ee758fef8f87f89765afbdf90695d2b44800cac9967f38bfbb9",
+    "implementation": {
+      "engine_source_sha256": "e0e61a03ae7503efa88e2e7b22b841effe0688eae297367635ccc628cf1244ef",
+      "python": "3.13.12",
+      "pyarrow": "25.0.1"
+    },
+    "actor_attribution": [
+      "fee_payer_proxy"
+    ],
+    "policy": {
+      "start_time": 1790631266,
+      "end_time": 1790717666,
+      "initial_sol_lamports": 1000000000000,
+      "entry_network_fee_lamports": null,
+      "exit_network_fee_lamports": null,
+      "entry_delay_slots": 1,
+      "exit_delay_slots": 1
+    }
+  }
+}
