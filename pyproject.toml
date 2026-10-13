@@ -45,6 +45,7 @@ dependencies = [
 backtest = "backtest.bootstrap.cli:app"
 backtest-job-child = "backtest.bootstrap.job_child:main"
 dnipro-backtest = "backtest.bootstrap.dnipro:main"
+carbon-cache = "backtest.bootstrap.carbon_cache:main"
 
 [dependency-groups]
 dev = [
