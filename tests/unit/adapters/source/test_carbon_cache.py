@@ -5,7 +5,9 @@ import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -443,3 +445,73 @@ def test_converter_ignores_apple_metadata_sidecars(tmp_path: Path) -> None:
     (output / "._.convert.lock").write_bytes(b"metadata")
     convert_cache(raw, output, reserve_gb=0)
     assert verify_cache(output)["complete"] is True
+
+
+def test_sort_memory_retry_cannot_lose_or_duplicate_rows(tmp_path: Path) -> None:
+    from backtest.adapters.source.carbon_cache.convert import copy_sorted_range, sorted_batches
+
+    source = tmp_path / "input.parquet"
+    values = [{"slot": 102}, {"slot": 100}, {"slot": 101}, {"slot": 100}]
+    pq.write_table(pa.Table.from_pylist(values), source)
+    attempts = []
+
+    def limited(src, dst, columns, order, low, high, memory, spill):
+        attempts.append((low, high))
+        if high - low > 1:
+            dst.write_bytes(b"partial COPY output")
+            raise duckdb.OutOfMemoryException("test budget")
+        copy_sorted_range(src, dst, columns, order, low, high, memory, spill)
+
+    counters = Counter()
+    work = tmp_path / "sort-work"
+    with patch("backtest.adapters.source.carbon_cache.convert.copy_sorted_range", limited):
+        rows = [
+            row
+            for batch in sorted_batches(source, ["slot"], "slot", 100, 103, 64, work, counters)
+            for row in batch.to_pylist()
+        ]
+    assert rows == [{"slot": 100}, {"slot": 100}, {"slot": 101}, {"slot": 102}]
+    assert counters["sort_memory_retries"] == 2
+    assert counters["sort_ranges"] == 3
+    assert not work.exists()
+
+
+def test_single_slot_sort_failure_is_bounded_and_cleans_temporary_output(tmp_path: Path) -> None:
+    from backtest.adapters.source.carbon_cache.convert import sorted_batches
+
+    source = tmp_path / "input.parquet"
+    pq.write_table(pa.Table.from_pylist([{"slot": 100}]), source)
+    work = tmp_path / "sort-work"
+    with (
+        patch(
+            "backtest.adapters.source.carbon_cache.convert.copy_sorted_range",
+            side_effect=duckdb.OutOfMemoryException("test"),
+        ),
+        pytest.raises(ValueError, match="One slot"),
+    ):
+        list(sorted_batches(source, ["slot"], "slot", 100, 101, 64, work, Counter()))
+    assert not work.exists()
+
+
+def test_duplicate_versions_in_one_slot_stay_together_after_memory_retry(tmp_path: Path) -> None:
+    from backtest.adapters.source.carbon_cache.convert import copy_sorted_range
+
+    raw = raw_cache(
+        tmp_path / "raw",
+        [
+            instruction([0, 1], "TradeEvent", trade(), priority=1),
+            instruction([0, 1], "TradeEvent", trade(sol_amount=2), priority=2),
+        ],
+    )
+
+    def limited(src, dst, columns, order, low, high, memory, spill):
+        if src.name.startswith("000") and high - low > 1:
+            raise duckdb.OutOfMemoryException("test budget")
+        copy_sorted_range(src, dst, columns, order, low, high, memory, spill)
+
+    output = tmp_path / "engine"
+    with patch("backtest.adapters.source.carbon_cache.convert.copy_sorted_range", limited):
+        convert_cache(raw, output, memory_mb=64, reserve_gb=0)
+    source = CarbonParquetSource(output)
+    assert source.manifest["counters"]["duplicate_versions"] == 1
+    assert [r["sold_amount"] for r in source.rows() if r["kind"] == "VENUE_TRADE"] == [2]

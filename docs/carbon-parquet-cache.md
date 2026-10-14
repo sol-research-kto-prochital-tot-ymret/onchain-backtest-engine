@@ -48,6 +48,11 @@ directory. Checksums, raw receipts, partition continuity, all instruction
 dispositions and the engine's actual event constructors are checked before
 publication. The default keeps 100 decimal GB free and limits DuckDB to one
 thread and 512 MB; sorting can spill within the current temporary partition.
+The sorter projects only the columns used by the translator and finishes each
+sort into temporary Parquet before reading Arrow batches. Memory failures
+bisect the slot interval, keeping every transaction's instructions together.
+A failed sort releases no rows; retrying cannot publish its partial output or
+duplicate rows. The same protection applies to the converted output tables.
 
 ## Native engine source
 
