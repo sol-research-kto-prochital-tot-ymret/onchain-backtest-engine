@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 
 from backtest.adapters.source.carbon_cache.convert import (
-    convert_cache,
     verify_cache,
 )
 from backtest.adapters.source.carbon_cache.reader import CarbonParquetSource
+from backtest.adapters.source.carbon_parallel import convert_cache_parallel
 
 
 def parser() -> argparse.ArgumentParser:
@@ -24,6 +24,7 @@ def parser() -> argparse.ArgumentParser:
     convert.add_argument("--output", type=Path, required=True)
     convert.add_argument("--memory-mb", type=int, default=512)
     convert.add_argument("--reserve-gb", type=int, default=100)
+    convert.add_argument("--workers", type=int, default=1, help="Parallel partition processes")
     for name in ("verify", "inspect"):
         item = sub.add_parser(name)
         item.add_argument("--output", type=Path, required=True)
@@ -34,8 +35,12 @@ def main() -> None:
     args = parser().parse_args()
     try:
         if args.command == "translate":
-            result = convert_cache(
-                args.raw, args.output, memory_mb=args.memory_mb, reserve_gb=args.reserve_gb
+            result = convert_cache_parallel(
+                args.raw,
+                args.output,
+                workers=args.workers,
+                memory_mb=args.memory_mb,
+                reserve_gb=args.reserve_gb,
             )
             print(
                 json.dumps(

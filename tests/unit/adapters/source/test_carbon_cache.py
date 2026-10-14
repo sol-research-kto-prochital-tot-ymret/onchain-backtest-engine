@@ -515,3 +515,119 @@ def test_duplicate_versions_in_one_slot_stay_together_after_memory_retry(tmp_pat
     source = CarbonParquetSource(output)
     assert source.manifest["counters"]["duplicate_versions"] == 1
     assert [r["sold_amount"] for r in source.rows() if r["kind"] == "VENUE_TRADE"] == [2]
+
+
+def partitioned_raw_cache(root: Path) -> Path:
+    raw_cache(root, [instruction([0, 1], "TradeEvent", trade())])
+    manifest = json.loads((root / "manifest.json").read_text())
+    records = [manifest["records"][0]]
+    for slot in (102, 104):
+        row = instruction([0, 1], "TradeEvent", trade(sol_amount=slot))
+        payload = json.loads(row["raw_json"])
+        payload.update(slot=slot, block_time=1000 + slot)
+        row.update(slot=slot, block_time=1000 + slot, raw_json=json.dumps(payload))
+        path = root / "chunks" / f"{slot:012d}-{slot + 2:012d}.parquet"
+        pq.write_table(pa.Table.from_pylist([row]), path)
+        record = dict(
+            records[0],
+            file="chunks/" + path.name,
+            from_slot=slot,
+            to_slot_exclusive=slot + 2,
+            bytes=path.stat().st_size,
+            sha256=file_hash(path),
+        )
+        atomic_json(root / "receipts" / (path.stem + ".json"), record)
+        records.append(record)
+    manifest.update(records=records, total_chunks=3, to_slot_exclusive=106)
+    atomic_json(root / "manifest.json", manifest)
+    return root
+
+
+def test_parallel_matches_serial_and_preserves_existing_prefix(tmp_path: Path) -> None:
+    from backtest.adapters.source.carbon_parallel import convert_cache_parallel
+
+    raw = partitioned_raw_cache(tmp_path / "raw")
+    serial = tmp_path / "serial"
+    convert_cache(raw, serial, reserve_gb=0, memory_mb=64)
+    parallel = tmp_path / "parallel"
+    convert_cache_parallel(raw, parallel, workers=2, reserve_gb=0, memory_mb=64)
+    for key in ("capabilities", "normalizer_code_sha256", "source_identity"):
+        assert (
+            json.loads((serial / "manifest.json").read_text())[key]
+            == json.loads((parallel / "manifest.json").read_text())[key]
+        )
+    for table in ("events", "transactions", "evidence", "boundaries"):
+        assert list(CarbonParquetSource(serial).rows(table)) == list(
+            CarbonParquetSource(parallel).rows(table)
+        )
+    marker = (parallel / "COMMITTED").read_bytes()
+    convert_cache_parallel(raw, parallel, workers=2, reserve_gb=0, memory_mb=64)
+    assert (parallel / "COMMITTED").read_bytes() == marker
+    manifest = json.loads((parallel / "manifest.json").read_text())
+    manifest.update(complete=False, records=manifest["records"][:1])
+    atomic_json(parallel / "manifest.json", manifest)
+    (parallel / "COMMITTED").unlink()
+    first = parallel / manifest["records"][0]["files"]["events"]["file"]
+    first_hash = file_hash(first)
+    # Out-of-order prepared files and an existing serial-format prefix are both
+    # recovered without touching committed payloads.
+    convert_cache_parallel(raw, parallel, workers=2, reserve_gb=0, memory_mb=64)
+    assert file_hash(first) == first_hash
+    assert verify_cache(parallel)["complete"]
+
+
+def test_parallel_failure_is_resumable_and_never_commits_incomplete_data(tmp_path: Path) -> None:
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from backtest.adapters.source.carbon_parallel import convert_cache_parallel, prepare_partition
+
+    raw = partitioned_raw_cache(tmp_path / "raw")
+    output = tmp_path / "parallel"
+
+    def failure(raw_root, destination, record, memory):
+        if record["from_slot"] == 102:
+            time.sleep(0.15)
+            raise ValueError("injected worker failure")
+        return prepare_partition(raw_root, destination, record, memory)
+
+    def threads(**kwargs):
+        return ThreadPoolExecutor(max_workers=kwargs["max_workers"])
+
+    with (
+        patch("backtest.adapters.source.carbon_parallel.ProcessPoolExecutor", threads),
+        patch("backtest.adapters.source.carbon_parallel.prepare_partition", failure),
+        pytest.raises(ValueError, match="injected worker"),
+    ):
+        convert_cache_parallel(raw, output, workers=2, reserve_gb=0, memory_mb=64)
+    assert not (output / "COMMITTED").exists()
+    convert_cache_parallel(raw, output, workers=2, reserve_gb=0, memory_mb=64)
+    assert verify_cache(output)["complete"]
+
+
+def test_parallel_rejects_corrupt_output_and_writer_lock(tmp_path: Path) -> None:
+    from backtest.adapters.source.carbon_parallel import convert_cache_parallel
+
+    raw = partitioned_raw_cache(tmp_path / "raw")
+    output = tmp_path / "parallel"
+    with (raw / ".export.lock").open("r") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):
+            convert_cache_parallel(raw, output, workers=2, reserve_gb=0)
+    convert_cache_parallel(raw, output, workers=2, reserve_gb=0, memory_mb=64)
+    manifest = json.loads((output / "manifest.json").read_text())
+    path = output / manifest["records"][0]["files"]["events"]["file"]
+    path.write_bytes(b"bad")
+    with pytest.raises(ValueError, match="checksum"):
+        convert_cache_parallel(raw, output, workers=2, reserve_gb=0)
+    assert path.read_bytes() == b"bad"
+
+
+def test_parallel_worker_limits_are_checked(tmp_path: Path) -> None:
+    from backtest.adapters.source.carbon_parallel import convert_cache_parallel
+
+    for workers, memory in ((0, 512), (2, 32)):
+        with pytest.raises(ValueError, match="workers"):
+            convert_cache_parallel(
+                tmp_path / "raw", tmp_path / "out", workers=workers, memory_mb=memory
+            )

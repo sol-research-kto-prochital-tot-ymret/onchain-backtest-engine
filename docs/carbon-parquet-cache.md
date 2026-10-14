@@ -120,3 +120,29 @@ remain unavailable unless separate source evidence supplies them.
 A successful format/replay validation does not establish a profitable strategy
 or exact execution costs. Venue execution models must respect these capabilities
 and the retained amount/reserve semantics.
+
+## Parallel translation
+
+Use `translate --workers 4` to process independent raw partitions in spawned
+Python processes. Every process keeps one DuckDB thread and one Arrow CPU/I/O
+thread, with its own `--memory-mb` sort budget (default 512 MB **per worker**, not
+a total RSS ceiling). Increase workers only while RAM and storage can sustain it.
+The scheduler keeps at most that many tasks active, reserves temporary disk
+space in addition to `--reserve-gb`, and never splits a transaction across tasks.
+
+The unchanged normalizer produces the same payloads and fingerprint as serial
+translation, so an existing serial checkpoint can resume with more workers.
+Workers only write private `.partial` directories; one coordinator publishes
+validated receipts/files and advances the manifest's contiguous prefix. Parts
+that finish out of order are recoverable prepared files. `progress.json`
+separates their count from `committed_prefix_parts`; its ETA uses measured
+aggregate wall time. A crash leaves raw files and committed outputs intact.
+Final accounting and COMMITTED use the original sequential coordinator after all
+parallel tasks finish. A second coordinator is rejected by the dataset lock.
+
+The collector forwards saved `--translation-workers` and
+`--translation-memory-mb` settings on both export and resume, for example:
+
+```bash
+solana-export resume --output /path/to/dataset --translation-workers 4
+```
