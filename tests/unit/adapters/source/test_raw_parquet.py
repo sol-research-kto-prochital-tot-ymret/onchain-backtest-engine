@@ -62,6 +62,8 @@ def dataset(root: Path, *, good_audit: bool = True) -> Path:
                 "protocol": "raw_finalized_block",
                 "event_id": "1" * 64,
                 "source_record_id": "2" * 64,
+                "block_hash": "retained-block-hash",
+                "expected_transactions": 2,
             }
             tables["events"] = pa.Table.from_pylist(
                 [
@@ -112,7 +114,9 @@ def dataset(root: Path, *, good_audit: bool = True) -> Path:
 def test_native_source_and_explicit_transfer_states(tmp_path):
     source = RawParquetSource(dataset(tmp_path))
     assert isinstance(source, HistoricalEventSource)
-    assert isinstance(next(source.events()), BlockEvent)
+    block = next(source.events())
+    assert isinstance(block, BlockEvent)
+    assert block.tx_count == 2 and block.block_hash == "retained-block-hash"
     assert [r["amount_raw"] for r in source.transfers()] == [1]
     assert [r["amount_raw"] for r in source.transfers(committed_only=False)] == [1, 3, 2]
     assert len(source.boundaries()) == 3  # Actual block boundary plus both transaction boundaries.

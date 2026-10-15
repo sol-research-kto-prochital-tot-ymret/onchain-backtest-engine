@@ -26,7 +26,7 @@ from backtest.domain.chain import (
 )
 from backtest.domain.hashing import domain_digest
 from backtest.domain.identifiers import ContentDigest, DatasetRevisionId, LogicalContentHash
-from backtest.domain.market_events import CanonicalEvent, canonical_event_sort_key
+from backtest.domain.market_events import BlockEvent, CanonicalEvent, canonical_event_sort_key
 from backtest.engine.replay import ReplayBoundary
 
 
@@ -165,6 +165,13 @@ class RawParquetSource:
             ):
                 raise ValueError("event position differs from typed columns")
             event = event_from_record(record)
+            if isinstance(event, BlockEvent):
+                event = BlockEvent(
+                    event.envelope,
+                    event.block_time_ns,
+                    record.get("expected_transactions"),
+                    record.get("block_hash"),
+                )
             key = canonical_event_sort_key(event)
             if previous is not None and key <= previous:
                 raise ValueError("raw Parquet event ordering is not strictly increasing")
