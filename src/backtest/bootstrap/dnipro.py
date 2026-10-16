@@ -101,9 +101,36 @@ def main() -> None:
     copier.add_argument("--out", type=Path, required=True)
     verifier = sub.add_parser("verify")
     verifier.add_argument("--snapshot", type=Path, required=True)
+    sniper = sub.add_parser(
+        "sniper-window", help="Sniper Window strategy through the native reference engine"
+    )
+    sniper.add_argument("--snapshot", type=Path, required=True)
+    sniper.add_argument("--out", type=Path, required=True)
+    sniper.add_argument("--target-return-bps", type=int)
+    sniper.add_argument("--holding-seconds", type=int)
+    sniper.add_argument("--initial-sol-lamports", type=int)
+    sniper.add_argument("--delay-slots", type=int)
+    sniper.add_argument("--minimum-entry-age-seconds", type=int)
+    sniper.add_argument("--maximum-entry-age-seconds", type=int)
+    sniper.add_argument("--trace-mint", action="append", default=[])
+    sniper.add_argument("--policy", type=Path)
+    sniper.add_argument("--require-exact", action="store_true")
+    sniper.add_argument("--empty-block-evidence", type=Path)
+    sniper.add_argument("--inventory-transfers", type=Path)
+    sniper.add_argument("--without-creator-fee-credit", action="store_true")
+    sniper.add_argument(
+        "--execution-mode",
+        choices=("EXOGENOUS_REPLAY", "EXOGENOUS_VIRTUAL_SETTLEMENT", "CONDITIONAL_PROTOCOL_REPLAY"),
+        default="EXOGENOUS_REPLAY",
+        help="strict historical liquidity or explicit synthetic research settlement",
+    )
     args = parser.parse_args()
     try:
-        if args.command == "import-snapshot":
+        if args.command == "sniper-window":
+            from backtest.bootstrap.sniper_window import execute
+
+            execute(args)
+        elif args.command == "import-snapshot":
             wallet = public_key(args.wallet)
             trades = deduplicate(normalize_trade(row, wallet) for row in _jsonl(args.trades))
             states = [normalize_state(row) for row in _jsonl(args.states)]
