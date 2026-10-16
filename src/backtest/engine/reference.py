@@ -24,6 +24,7 @@ from backtest.domain.execution import (
 )
 from backtest.domain.hashing import domain_digest
 from backtest.domain.identifiers import (
+    AccountId,
     # Include asset id so the identifiers dependency remains explicit.
     AssetId,
     BundleId,
@@ -174,14 +175,22 @@ class ReferenceRunConfig:
     initial_available: Mapping[AssetId, int]
     maximum_dynamic_items: int = 1_000_000
     engine_bundle_id: BundleId = ENGINE_BUNDLE_ID
+    protocol_reducer_enabled: bool = False
 
     def __post_init__(self) -> None:
         # Execute the reference run config post init workflow in explicit, reviewable
         # steps.
         KeyedRng(self.root_seed)
+        if (
+            self.execution_mode is ExecutionMode.CONDITIONAL_PROTOCOL_REPLAY
+            and not self.protocol_reducer_enabled
+        ):
+            raise ValueError("reference execution mode is unsupported without a protocol reducer")
         if not isinstance(self.execution_mode, ExecutionMode) or self.execution_mode not in {
             ExecutionMode.EXOGENOUS_REPLAY,
+            ExecutionMode.EXOGENOUS_VIRTUAL_SETTLEMENT,
             ExecutionMode.SHADOW_STATE_REPLAY,
+            ExecutionMode.CONDITIONAL_PROTOCOL_REPLAY,
         }:
             raise ValueError("reference FirstSwap engine execution mode is unsupported")
         if self.maximum_dynamic_items <= 0:
@@ -570,6 +579,11 @@ class ReferenceBacktestEngine:
         # Assemble venue once so the reference backtest engine run workflow shares one
         # value.
         venue = SimulationVenueState(config.execution_mode)
+        conditional_reconcile = getattr(execution_model, "reconcile_conditional_group", None)
+        if config.execution_mode is ExecutionMode.CONDITIONAL_PROTOCOL_REPLAY and not callable(
+            conditional_reconcile
+        ):
+            raise ValueError("conditional replay requires a protocol-specific reducer")
         portfolio = PortfolioState(config.initial_available)
         portfolio_view = PortfolioView(portfolio)
         observed_view = ObservedMarketView(observed)
@@ -673,7 +687,11 @@ class ReferenceBacktestEngine:
                 }
             )
 
-            venue.reconcile_group(events, historical)
+            if config.execution_mode is ExecutionMode.CONDITIONAL_PROTOCOL_REPLAY:
+                assert callable(conditional_reconcile)
+                conditional_reconcile(events, historical, venue)
+            else:
+                venue.reconcile_group(events, historical)
             recorder.append_audit(
                 {
                     # Keep boundary ordinal named so the simulation reconciled and
@@ -972,7 +990,12 @@ class ReferenceBacktestEngine:
                 except ExecutionRejected as error:
                     # Translate the ExecutionRejected failure through the reference
                     # backtest engine run boundary.
-                    release_transaction = _release_transaction(intent, boundary, error.code)
+                    release_transaction = _release_transaction(
+                        intent,
+                        boundary,
+                        error.code,
+                        execution_fee_atomic=error.execution_fee_atomic,
+                    )
                     portfolio.apply(release_transaction)
                     recorder.append_ledger(release_transaction)
                     terminal_orders.add(intent.order_id)
@@ -999,6 +1022,7 @@ class ReferenceBacktestEngine:
                             OrderStatus.EXECUTION_FAILED,
                             boundary,
                             reports=(error.code,),
+                            execution_fee_atomic=error.execution_fee_atomic,
                             # Complete ExecutionNotification only after its order id and
                             # execution failed inputs are visible in reference backtest engine
                             # run.
@@ -1049,6 +1073,13 @@ class ReferenceBacktestEngine:
                         boundary,
                         fills=plan.fills,
                         reports=plan.reports,
+                        execution_fee_atomic=sum(
+                            p.amount_atomic
+                            for p in plan.ledger_postings
+                            if p.account.kind is AccountKind.NETWORK_FEE
+                            and p.asset_id == intent.execution_fee_asset_id
+                            and p.amount_atomic > 0
+                        ),
                     )
                 )
 
@@ -1157,7 +1188,7 @@ def _reservation_transaction(
     boundary: int,
 ) -> LedgerTransaction:
     # Execute the reservation transaction workflow in explicit, reviewable steps.
-    postings = (
+    postings: tuple[Posting, ...] = (
         Posting(
             LedgerAccount(
                 available_account_id(intent.sold_asset_id),
@@ -1181,6 +1212,23 @@ def _reservation_transaction(
             intent.amount_in_atomic,
         ),
     )
+    fee_identity: dict[str, object] = {}
+    if intent.execution_fee_asset_id is not None:
+        fee_asset = intent.execution_fee_asset_id
+        fee = intent.execution_fee_reserve_atomic
+        postings += (
+            Posting(
+                LedgerAccount(available_account_id(fee_asset), AccountKind.PORTFOLIO_AVAILABLE),
+                fee_asset,
+                -fee,
+            ),
+            Posting(
+                LedgerAccount(reserved_account_id(fee_asset), AccountKind.PORTFOLIO_RESERVED),
+                fee_asset,
+                fee,
+            ),
+        )
+        fee_identity = {"execution_fee_asset": fee_asset.value, "execution_fee_reserve": fee}
     digest = domain_digest(
         "backtest.ledger-reservation.v1",
         # Open the v1 and amount atomic payload explicitly for domain_digest within
@@ -1190,6 +1238,7 @@ def _reservation_transaction(
             "asset_id": intent.sold_asset_id.value,
             "boundary_ordinal": boundary,
             "order_id": intent.order_id.hex,
+            **fee_identity,
             # Close the v1 and amount atomic payload only after all reservation transaction
             # fields are present.
         },
@@ -1210,9 +1259,11 @@ def _release_transaction(
     intent: SwapExactInIntent,
     boundary: int,
     reason_code: str,
+    *,
+    execution_fee_atomic: int = 0,
 ) -> LedgerTransaction:
     # Execute the release transaction workflow in explicit, reviewable steps.
-    postings = (
+    postings: tuple[Posting, ...] = (
         Posting(
             LedgerAccount(
                 reserved_account_id(intent.sold_asset_id),
@@ -1236,6 +1287,40 @@ def _release_transaction(
             intent.amount_in_atomic,
         ),
     )
+    if not 0 <= execution_fee_atomic <= intent.execution_fee_reserve_atomic:
+        raise EngineInvariantError("failed execution fee exceeds its reservation")
+    fee_identity: dict[str, object] = {}
+    if intent.execution_fee_asset_id is not None:
+        fee_asset = intent.execution_fee_asset_id
+        reserve = intent.execution_fee_reserve_atomic
+        postings += (
+            Posting(
+                LedgerAccount(reserved_account_id(fee_asset), AccountKind.PORTFOLIO_RESERVED),
+                fee_asset,
+                -reserve,
+            ),
+        )
+        if reserve > execution_fee_atomic:
+            postings += (
+                Posting(
+                    LedgerAccount(available_account_id(fee_asset), AccountKind.PORTFOLIO_AVAILABLE),
+                    fee_asset,
+                    reserve - execution_fee_atomic,
+                ),
+            )
+        if execution_fee_atomic:
+            postings += (
+                Posting(
+                    LedgerAccount(AccountId("network:failed-execution"), AccountKind.NETWORK_FEE),
+                    fee_asset,
+                    execution_fee_atomic,
+                ),
+            )
+        fee_identity = {
+            "execution_fee_asset": fee_asset.value,
+            "execution_fee_reserve": reserve,
+            "execution_fee_paid": execution_fee_atomic,
+        }
     digest = domain_digest(
         "backtest.ledger-release.v1",
         # Open the reason code and v1 payload explicitly for domain_digest within release
@@ -1248,6 +1333,7 @@ def _release_transaction(
             # Keep reason named so the reason code and v1 payload passed to domain_digest
             # remains self-describing within release transaction.
             "reason": reason_code,
+            **fee_identity,
         },
     )
     return LedgerTransaction(
@@ -1315,11 +1401,28 @@ def _validate_execution_plan(
         raise EngineInvariantError("execution plan fill has a non-current boundary")
     if sum(fill.amount_in_atomic for fill in plan.fills) != intent.amount_in_atomic:
         raise EngineInvariantError("execution plan input amount differs from reserved input")
-    if mode is ExecutionMode.EXOGENOUS_REPLAY and plan.transition is not None:
+    if intent.execution_fee_asset_id is not None:
+        expected = {intent.sold_asset_id: intent.amount_in_atomic}
+        asset = intent.execution_fee_asset_id
+        expected[asset] = expected.get(asset, 0) + intent.execution_fee_reserve_atomic
+        for reserved_asset, amount in expected.items():
+            actual = sum(
+                p.amount_atomic
+                for p in plan.ledger_postings
+                if p.account.account_id == reserved_account_id(reserved_asset)
+                and p.asset_id == reserved_asset
+            )
+            if actual != -amount:
+                raise EngineInvariantError("execution plan does not settle all reserved costs")
+    exogenous = mode in {
+        ExecutionMode.EXOGENOUS_REPLAY,
+        ExecutionMode.EXOGENOUS_VIRTUAL_SETTLEMENT,
+    }
+    if exogenous and plan.transition is not None:
         raise EngineInvariantError("exogenous execution must not mutate venue state")
     # Evaluate the complete validate execution plan mode, exogenous replay and transition
     # condition before guarded effects.
-    if mode is not ExecutionMode.EXOGENOUS_REPLAY and plan.transition is None:
+    if not exogenous and plan.transition is None:
         raise EngineInvariantError("stateful execution requires a venue transition")
 
 
