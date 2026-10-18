@@ -101,6 +101,9 @@ def main() -> None:
     copier.add_argument("--out", type=Path, required=True)
     verifier = sub.add_parser("verify")
     verifier.add_argument("--snapshot", type=Path, required=True)
+    pump = sub.add_parser("pump-replay", help="Causal native-mint Pump V3/PumpSwap V2 replay")
+    pump.add_argument("--input", type=Path, required=True)
+    pump.add_argument("--out", type=Path, required=True)
     sniper = sub.add_parser(
         "sniper-window", help="Sniper Window strategy through the native reference engine"
     )
@@ -126,7 +129,11 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        if args.command == "sniper-window":
+        if args.command == "pump-replay":
+            from backtest.bootstrap.pump_replay import run_cli
+
+            print(json.dumps(run_cli(args.input, args.out), indent=2))
+        elif args.command == "sniper-window":
             from backtest.bootstrap.sniper_window import execute
 
             execute(args)

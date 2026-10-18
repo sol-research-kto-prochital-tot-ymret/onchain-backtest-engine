@@ -34,6 +34,11 @@ contracts, and the [security review](security/REVIEW.md) for the dependency fixe
 worker credential isolation, and recorded validation. The upstream engine and
 MIT license are retained below.
 
+Modern native-mint Pump V3/PumpSwap V2 routes, signed reserves, retained fees,
+holder rewards and synthetic migration have a separate causal replay command:
+[`dnipro-backtest pump-replay`](docs/pump-modern-replay.md). Legacy SOL-only
+strategy contracts remain unchanged; incomplete historical state fails closed.
+
 On-Chain Backtest Engine selectively reads a requested range from an external read-only
 ClickHouse source, publishes an immutable canonical Parquet snapshot, and
 replays it deterministically on a single Linux, macOS, or Windows host with
