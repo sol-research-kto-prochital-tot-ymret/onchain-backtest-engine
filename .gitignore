@@ -93,7 +93,3 @@ TODO.md
 /frontend/demo-dist/
 /frontend/.demo-export-*/
 /frontend/demo-test-results/
-
-# Interrupted notebook executions remain local diagnostics.
-/notebooks/*.partial.ipynb
-/notebooks/.ipynb_checkpoints/

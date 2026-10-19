@@ -261,15 +261,6 @@ flowchart LR
 
 ## 3.4 Current project state
 
-The fork also has a separate research CLI, `dnipro-backtest sniper-window`,
-for Sniper Break-Even Window V0 on verified retained snapshots. It uses the
-native reference scheduler, reservations and ledger, with Pump quote adapters
-and an explicit conditional protocol reducer. Its conditional scenarios and
-dated Jupyter reviews do not extend the typed Sniping CLI/API/Web UI admission
-contract below. Historical seller inventory conflicts and missing acquisition
-evidence remain unresolved exposure. See [the research execution guide](sniper-window.md)
-and [the notebook index](../notebooks/README.md).
-
 The implementation provides a production-oriented reference vertical slice of
 the architecture and network-aware Pump.fun Sniping on verified local
 artifacts. Live data requires exact, cut-scoped admission:

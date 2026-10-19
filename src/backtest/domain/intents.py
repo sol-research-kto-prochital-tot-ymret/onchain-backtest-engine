@@ -32,8 +32,6 @@ class SwapExactInIntent:
     amount_in_atomic: int
     minimum_amount_out_atomic: int
     created_boundary_ordinal: int
-    execution_fee_asset_id: AssetId | None = None
-    execution_fee_reserve_atomic: int = 0
 
     def __post_init__(self) -> None:
         # Execute the swap exact in intent post init workflow in explicit, reviewable
@@ -49,17 +47,6 @@ class SwapExactInIntent:
             raise ValueError("minimum_amount_out_atomic must be non-negative")
         if self.created_boundary_ordinal < 0:
             raise ValueError("created_boundary_ordinal must be non-negative")
-        if (
-            type(self.execution_fee_reserve_atomic) is not int
-            or self.execution_fee_reserve_atomic < 0
-        ):
-            raise ValueError("execution fee reserve must be a non-negative integer")
-        if (self.execution_fee_asset_id is None) != (self.execution_fee_reserve_atomic == 0):
-            raise ValueError("execution fee asset and positive reserve must be supplied together")
-        if self.execution_fee_asset_id is not None and not isinstance(
-            self.execution_fee_asset_id, AssetId
-        ):
-            raise TypeError("execution fee asset must be an AssetId")
 
     @property
     def intent_kind(self) -> str:

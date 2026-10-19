@@ -46,7 +46,6 @@ class VenueStateCommit:
     """Opaque, validated candidate for atomic engine commit."""
 
     pools: dict[PoolId, PoolSnapshot]
-    replace_all: bool = True
 
 
 class HistoricalReferenceState:
@@ -91,13 +90,11 @@ class HistoricalReferenceState:
             raise HistoricalStateError(
                 "historical group ordering is ambiguous and has no invariant reducer"
             )
-        # Validate the complete group into private deltas before changing state.
-        # None of these reducers reads an untouched prior record to validate it.
-        candidate_pools: dict[PoolId, PoolSnapshot] = {}
-        candidate_assets: set[AssetId] = set()
+        candidate_pools = dict(self._pools)
+        candidate_assets = set(self._assets)
         # Assemble candidate times once so the historical reference state apply group
         # workflow shares one value.
-        candidate_times: dict[int, int] = {}
+        candidate_times = dict(self._block_times_ns)
         for event in events:
             # Process events inside the bounded historical reference state apply group
             # loop.
@@ -130,11 +127,11 @@ class HistoricalReferenceState:
                         reserve_b_atomic=event.reserve_b_after_atomic,
                         boundary_ordinal=boundary,
                     )
-        self._pools.update(candidate_pools)
+        self._pools = candidate_pools
         # Assemble self assets once so the historical reference state apply group workflow
         # shares one value.
-        self._assets.update(candidate_assets)
-        self._block_times_ns.update(candidate_times)
+        self._assets = candidate_assets
+        self._block_times_ns = candidate_times
 
     def pool(self, pool_id: PoolId) -> PoolSnapshot | None:
         return self._pools.get(pool_id)
@@ -189,10 +186,6 @@ class SimulationVenueState:
         self.mode = mode
         self._pools: dict[PoolId, PoolSnapshot] = {}
 
-    def snapshot_pools(self) -> dict[PoolId, PoolSnapshot]:
-        """Copy the current pools for an atomic protocol-specific group reducer."""
-        return dict(self._pools)
-
     def reconcile_group(
         self,
         events: tuple[CanonicalEvent, ...],
@@ -210,7 +203,6 @@ class SimulationVenueState:
                 continue
             if self.mode in {
                 ExecutionMode.EXOGENOUS_REPLAY,
-                ExecutionMode.EXOGENOUS_VIRTUAL_SETTLEMENT,
                 # Keep execution mode visible while evaluating the mode, exogenous replay
                 # and shadow state replay guard.
                 ExecutionMode.SHADOW_STATE_REPLAY,
@@ -237,10 +229,7 @@ class SimulationVenueState:
         current = self._pools.get(transition.pool_id)
         if current is None:
             raise HistoricalStateError("venue transition references an unknown pool")
-        if self.mode in {
-            ExecutionMode.EXOGENOUS_REPLAY,
-            ExecutionMode.EXOGENOUS_VIRTUAL_SETTLEMENT,
-        }:
+        if self.mode is ExecutionMode.EXOGENOUS_REPLAY:
             return VenueStateCommit(dict(self._pools))
         # Assemble candidate once so the simulation venue state preview transition
         # workflow shares one value.
@@ -260,10 +249,7 @@ class SimulationVenueState:
     # Define simulation venue state commit as one focused operation with an explicit
     # boundary.
     def commit(self, candidate: VenueStateCommit) -> None:
-        if candidate.replace_all:
-            self._pools = dict(candidate.pools)
-        else:
-            self._pools.update(candidate.pools)
+        self._pools = dict(candidate.pools)
 
 
 __all__ = [

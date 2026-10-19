@@ -144,12 +144,3 @@ is not yet connected to the upstream dashboard's exact dataset job workflow.
 The production collector and database schema were not changed by this work.
 
 See [security review](../security/REVIEW.md) for the reviewed scope and patches.
-
-## Sniper break even research
-
-`dnipro-backtest sniper-window` runs the corrected Sniper Break-Even Window V0
-strategy through the fork's native reference engine, Pump quote model and
-double-entry ledger. It reads a verified frozen Silver cohort and emits CSV
-positions, fills, fees and ledger postings. See [the strategy's execution
-assumptions and reproduction commands](sniper-window.md), including the
-historical reserve cap and separately hashed empty-block evidence.

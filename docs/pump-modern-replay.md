@@ -1,7 +1,7 @@
 # Modern Pump replay
 
 The engine includes an explicit modern Pump execution path alongside its unchanged,
-SOL-only legacy Sniper Window/copy-buy strategies. This is production package code,
+SOL-only legacy sniping/copy-buy runtimes. This is production package code,
 not an import from the research scripts. Use the modern path for arbitrary quote
 mints and route-level accounting; the legacy strategies are **not** silently
 converted to route strategies or marked compatible with every new account layout.
@@ -97,8 +97,8 @@ fast paths are not silently changed into modern protocol projectors.
 
 Negative signed offsets are documented from September 30; depth-2 creation from
 October 13. Dates are not proof that an individual account/instruction used a new
-version. Version and state evidence must be pinned per observation, including for
-October 12 datasets. Re-normalizing old cache data changes the normalizer fingerprint;
+version. Version and state evidence must be pinned per observation.
+Re-normalizing old cache data changes the normalizer fingerprint;
 old serial/parallel checkpoints are not reusable under a different fingerprint.
 
 The new quote path fails closed for unknown fee contracts, nonzero buyback-split

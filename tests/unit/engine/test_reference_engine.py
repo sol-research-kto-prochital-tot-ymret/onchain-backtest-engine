@@ -61,10 +61,10 @@ TOKEN = AssetId("TOKEN")
 POOL = PoolId("pool")
 
 
-def test_reference_config_rejects_unimplemented_conditional_reducer() -> None:
+def test_first_swap_config_rejects_sniping_only_virtual_settlement_mode() -> None:
     with pytest.raises(ValueError, match="execution mode is unsupported"):
         ReferenceRunConfig(
-            execution_mode=ExecutionMode.CONDITIONAL_PROTOCOL_REPLAY,
+            execution_mode=ExecutionMode.EXOGENOUS_VIRTUAL_SETTLEMENT,
             latency=SlotLatencyModel(),
             root_seed=42,
             initial_available={SOL: 1_000},

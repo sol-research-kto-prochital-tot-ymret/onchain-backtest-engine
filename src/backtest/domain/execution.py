@@ -30,14 +30,11 @@ class OrderStatus(StrEnum):
 class ExecutionRejected(ValueError):
     """Expected deterministic venue rejection, safe to encode in audit."""
 
-    def __init__(self, code: str, *, execution_fee_atomic: int = 0) -> None:
+    def __init__(self, code: str) -> None:
         # Execute the execution rejected init workflow in explicit, reviewable steps.
         if not code or code != code.strip() or not code.replace("_", "").isalnum():
             raise ValueError("execution rejection code must be a stable token")
         self.code = code
-        if type(execution_fee_atomic) is not int or execution_fee_atomic < 0:
-            raise ValueError("failed execution fee must be a non-negative integer")
-        self.execution_fee_atomic = execution_fee_atomic
         super().__init__(code)
 
 
@@ -116,15 +113,12 @@ class ExecutionNotification:
     # Declare fills explicitly in the execution notification contract.
     fills: tuple[Fill, ...] = ()
     reports: tuple[str, ...] = ()
-    execution_fee_atomic: int = 0
 
     def __post_init__(self) -> None:
         # Execute the execution notification post init workflow in explicit, reviewable
         # steps.
         if self.boundary_ordinal < 0:
             raise ValueError("notification boundary must be non-negative")
-        if type(self.execution_fee_atomic) is not int or self.execution_fee_atomic < 0:
-            raise ValueError("notification execution fee must be a non-negative integer")
         if any(fill.order_id != self.order_id for fill in self.fills):
             raise ValueError("notification contains a fill for another order")
         if self.status is OrderStatus.FILLED and not self.fills:

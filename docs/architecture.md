@@ -10,13 +10,6 @@ is recorded in deep-dive §3.4.
 
 Status: accepted as a synchronized overview
 
-The fork's separate `dnipro-backtest sniper-window` research command reuses the
-native reference engine for the Sniper Break-Even strategy, including explicit
-conditional replay scenarios and dated Jupyter reviews. It does not extend the
-typed Sniping CLI/API/Web UI admission contract. Missing or conflicting external
-inventory remains unresolved exposure. See [the research guide](sniper-window.md)
-and [notebook index](../notebooks/README.md); deep-dive §3.4 records this boundary.
-
 > The complete normative description is in the
 > [architecture deep dive](architecture-deep-dive.md). This file is its concise
 > map and does not introduce independent decisions. When wording is ambiguous,
