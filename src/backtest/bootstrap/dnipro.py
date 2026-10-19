@@ -101,9 +101,16 @@ def main() -> None:
     copier.add_argument("--out", type=Path, required=True)
     verifier = sub.add_parser("verify")
     verifier.add_argument("--snapshot", type=Path, required=True)
+    pump = sub.add_parser("pump-replay", help="Causal native-mint Pump V3/PumpSwap V2 replay")
+    pump.add_argument("--input", type=Path, required=True)
+    pump.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     try:
-        if args.command == "import-snapshot":
+        if args.command == "pump-replay":
+            from backtest.bootstrap.pump_replay import run_cli
+
+            print(json.dumps(run_cli(args.input, args.out), indent=2))
+        elif args.command == "import-snapshot":
             wallet = public_key(args.wallet)
             trades = deduplicate(normalize_trade(row, wallet) for row in _jsonl(args.trades))
             states = [normalize_state(row) for row in _jsonl(args.states)]
